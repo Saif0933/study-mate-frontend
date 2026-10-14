@@ -37,6 +37,11 @@ class AppConfig {
       return _rawApiBaseUrl;
     }
 
+    if (kReleaseMode) {
+      // In production release builds, never connect to development local loopbacks
+      return 'https://api.studymate.ai/api/v1';
+    }
+
     if (_rawBackendHost.isNotEmpty) {
       return 'http://$_rawBackendHost:$_rawBackendPort/api/v1';
     }
