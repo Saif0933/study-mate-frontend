@@ -17,6 +17,13 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  void _showEditProfileDialog(String? currentName) {
+    showDialog(
+      context: context,
+      builder: (ctx) => _EditProfileDialog(initialName: currentName),
+    );
+  }
+
   void _confirmSignOut() {
     showDialog(
       context: context,
@@ -286,11 +293,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                user?.displayName ?? 'Learner',
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      user?.displayName ?? 'Learner',
+                                      style: theme.textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 18,
+                                      color: AppTheme.primary,
+                                    ),
+                                    tooltip: 'Edit Profile Name',
+                                    onPressed: () => _showEditProfileDialog(
+                                      user?.displayName,
+                                    ),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 2),
                               Text(
@@ -898,6 +924,112 @@ class _FeedbackDialogState extends ConsumerState<_FeedbackDialog> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Text('Submit Feedback'),
+        ),
+      ],
+    );
+  }
+}
+
+class _EditProfileDialog extends ConsumerStatefulWidget {
+  final String? initialName;
+  const _EditProfileDialog({this.initialName});
+
+  @override
+  ConsumerState<_EditProfileDialog> createState() => _EditProfileDialogState();
+}
+
+class _EditProfileDialogState extends ConsumerState<_EditProfileDialog> {
+  late final TextEditingController _controller;
+  String? _dialogError;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialName ?? '');
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final trimmed = _controller.text.trim();
+    if (trimmed.isEmpty) {
+      setState(() {
+        _dialogError = 'Display name cannot be empty';
+      });
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _dialogError = null;
+    });
+
+    final result = await ref
+        .read(authControllerProvider.notifier)
+        .updateProfile(trimmed);
+
+    if (!mounted) return;
+
+    if (result.success) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Profile updated successfully!'),
+          backgroundColor: AppTheme.success,
+        ),
+      );
+    } else {
+      setState(() {
+        _isSaving = false;
+        _dialogError = result.error ?? 'Failed to update profile';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit Profile Name'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Your display name is shown on your study dashboard and reports.',
+            style: TextStyle(fontSize: 13),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            maxLength: 100,
+            decoration: InputDecoration(
+              labelText: 'Display Name',
+              hintText: 'Enter your name',
+              errorText: _dialogError,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving ? null : _save,
+          child: _isSaving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Save'),
         ),
       ],
     );

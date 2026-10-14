@@ -75,6 +75,20 @@ class FakeApiClient extends Fake implements ApiClient {
   }
 
   @override
+  Future<dynamic> patch(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
+    requests.add((method: 'PATCH', path: path, data: data));
+    if (errors.containsKey(path)) {
+      throw errors[path]!;
+    }
+    return responses[path];
+  }
+
+  @override
   Future<dynamic> delete(
     String path, {
     dynamic data,
@@ -378,6 +392,85 @@ void main() {
 
         // Local tokens were NOT cleared because deletion failed on server
         expect(await storageService.hasToken(), isTrue);
+
+        container.dispose();
+      },
+    );
+
+    test(
+      'updateProfile updates displayName on server via PATCH /me, saves user to storage, and updates Authenticated state',
+      () async {
+        await storageService.saveToken('token-alice');
+        await storageService.saveUser(testUser.toJson());
+
+        apiClient.responses['/me'] = {
+          'id': 'user-1',
+          'email': 'student@example.com',
+          'displayName': 'Alice Wonder',
+          'status': 'ACTIVE',
+        };
+
+        final container = ProviderContainer(
+          overrides: [authRepositoryProvider.overrideWithValue(authRepository)],
+        );
+
+        final controller = container.read(authControllerProvider.notifier);
+        apiClient.responses['/auth/session'] = {
+          'token': 'token-alice',
+          'user': testUser.toJson(),
+        };
+        await controller.login('student@example.com', 'Pass123!');
+        expect(container.read(authControllerProvider), isA<Authenticated>());
+
+        final result = await controller.updateProfile('Alice Wonder');
+
+        expect(result.success, isTrue);
+        expect(result.error, isNull);
+        expect(result.user?.displayName, 'Alice Wonder');
+
+        final state = container.read(authControllerProvider);
+        expect(state, isA<Authenticated>());
+        expect((state as Authenticated).user.displayName, 'Alice Wonder');
+
+        final cached = await storageService.getUser();
+        expect(cached?['displayName'], 'Alice Wonder');
+
+        container.dispose();
+      },
+    );
+
+    test(
+      'updateProfile on failure retains previous state and returns informative error',
+      () async {
+        await storageService.saveToken('token-alice');
+        await storageService.saveUser(testUser.toJson());
+
+        apiClient.errors['/me'] = const ApiException(
+          code: 'VALIDATION_ERROR',
+          statusCode: 400,
+          message: 'Display name cannot be empty',
+        );
+
+        final container = ProviderContainer(
+          overrides: [authRepositoryProvider.overrideWithValue(authRepository)],
+        );
+
+        final controller = container.read(authControllerProvider.notifier);
+        apiClient.responses['/auth/session'] = {
+          'token': 'token-alice',
+          'user': testUser.toJson(),
+        };
+        await controller.login('student@example.com', 'Pass123!');
+
+        final result = await controller.updateProfile('');
+
+        expect(result.success, isFalse);
+        expect(result.error, contains('Display name cannot be empty'));
+
+        // Previous state is retained
+        final state = container.read(authControllerProvider);
+        expect(state, isA<Authenticated>());
+        expect((state as Authenticated).user.displayName, 'Alice Learner');
 
         container.dispose();
       },

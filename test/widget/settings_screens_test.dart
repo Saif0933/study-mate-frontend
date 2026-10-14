@@ -47,6 +47,20 @@ class MockAuthController extends AuthController {
       );
     }
   }
+
+  bool updateProfileCalled = false;
+  String? updatedDisplayName;
+
+  @override
+  Future<({bool success, String? error, UserModel? user})> updateProfile(
+    String displayName,
+  ) async {
+    updateProfileCalled = true;
+    updatedDisplayName = displayName;
+    final updated = currentUser.copyWith(displayName: displayName);
+    state = Authenticated(updated);
+    return (success: true, error: null, user: updated);
+  }
 }
 
 class FakeFeedbackRepository extends Fake implements FeedbackRepository {
@@ -482,6 +496,54 @@ void main() {
 
         expect(mockAuth.deleteCalled, isTrue);
         expect(mockAuth.state, isA<Unauthenticated>());
+      },
+    );
+
+    testWidgets(
+      'tapping edit profile icon opens edit dialog, updates display name, and shows confirmation',
+      (tester) async {
+        final mockAuth = MockAuthController(currentUser: testUser);
+        final fakeFeedback = FakeFeedbackRepository();
+        const usage = UsageModel();
+
+        await tester.pumpWidget(
+          createTestWidget(
+            authController: mockAuth,
+            usage: usage,
+            feedbackRepo: fakeFeedback,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Find edit profile icon button
+        final editButtonFinder = find.byTooltip('Edit Profile Name');
+        expect(editButtonFinder, findsOneWidget);
+        await tester.tap(editButtonFinder);
+        await tester.pumpAndSettle();
+
+        // Verify dialog opens
+        expect(find.text('Edit Profile Name'), findsOneWidget);
+        expect(find.byType(TextField), findsOneWidget);
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller?.text,
+          'Alice Learner',
+        );
+
+        // Enter new display name
+        final textFieldFinder = find.byType(TextField);
+        await tester.enterText(textFieldFinder, 'Alice Wonder');
+        await tester.pumpAndSettle();
+
+        // Tap Save
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+
+        // Verify update was called with new name
+        expect(mockAuth.updateProfileCalled, isTrue);
+        expect(mockAuth.updatedDisplayName, 'Alice Wonder');
+
+        // Verify SnackBar confirmation appears
+        expect(find.text('Profile updated successfully!'), findsOneWidget);
       },
     );
   });

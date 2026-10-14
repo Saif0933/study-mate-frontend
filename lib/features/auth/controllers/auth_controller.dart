@@ -186,6 +186,24 @@ class AuthController extends Notifier<AuthState> {
     }
   }
 
+  Future<({bool success, String? error, UserModel? user})> updateProfile(
+    String displayName,
+  ) async {
+    try {
+      final updatedUser = await _repository.updateProfile(
+        displayName: displayName,
+      );
+      state = Authenticated(updatedUser);
+      return (success: true, error: null, user: updatedUser);
+    } on ApiException catch (e) {
+      final failure = ErrorMapper.map(e);
+      return (success: false, error: failure.message, user: null);
+    } catch (e) {
+      final failure = ErrorMapper.map(e);
+      return (success: false, error: failure.message, user: null);
+    }
+  }
+
   void clearError() {
     if (state is AuthError) {
       state = const Unauthenticated();

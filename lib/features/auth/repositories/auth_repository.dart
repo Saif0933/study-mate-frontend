@@ -115,9 +115,26 @@ class AuthRepository {
     await storageService.clearSession();
   }
 
+  /// Update current user profile (e.g. displayName)
+  Future<UserModel> updateProfile({required String displayName}) async {
+    final response = await apiClient.patch(
+      '/me',
+      data: {'displayName': displayName.trim()},
+    );
+    final user = UserModel.fromJson(response as Map<String, dynamic>);
+    await storageService.saveUser(user.toJson());
+    return user;
+  }
+
   /// Logout and clear saved tokens
   Future<void> logout() async {
-    await storageService.clearSession();
+    try {
+      await apiClient.post('/auth/logout');
+    } catch (_) {
+      // Best effort backend notification; always purge local tokens
+    } finally {
+      await storageService.clearSession();
+    }
   }
 
   /// Check if session exists in secure storage
