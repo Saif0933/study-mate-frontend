@@ -25,7 +25,8 @@ class AppConfig {
   /// 2. --dart-define=API_BASE_URL=... (e.g. production/staging full URL)
   /// 3. --dart-define=BACKEND_HOST=... with --dart-define=BACKEND_PORT=... (e.g. physical Android device via LAN IP)
   /// 4. Platform-aware default:
-  ///    - Android emulator: http://10.0.2.2:PORT/api/v1
+  ///    - Android: http://127.0.0.1:PORT/api/v1 (forwarded via `adb reverse tcp:5000 tcp:5000`)
+  ///      with automated fallback to 10.0.2.2 (emulator) and LAN IP (Wi-Fi/tethering)
   ///    - Web: http://localhost:PORT/api/v1
   ///    - Desktop / iOS Simulator: http://127.0.0.1:PORT/api/v1
   static String get apiBaseUrl {
@@ -51,12 +52,40 @@ class AppConfig {
     }
 
     if (defaultTargetPlatform == TargetPlatform.android) {
-      // Android emulator loopback IP to access host machine localhost
-      return 'http://10.0.2.2:$_rawBackendPort/api/v1';
+      // Physical Android devices forward via `adb reverse tcp:5000 tcp:5000`.
+      // Fallback candidates: 10.0.2.2 (emulator) and local network IP.
+      return 'http://127.0.0.1:$_rawBackendPort/api/v1';
     }
 
     // iOS simulator or desktop development (Windows, macOS, Linux)
     return 'http://127.0.0.1:$_rawBackendPort/api/v1';
+  }
+
+  /// Ordered list of candidate backend development base URLs for mobile devices.
+  static List<String> get candidateBaseUrls {
+    if (_baseUrlOverride != null && _baseUrlOverride!.isNotEmpty) {
+      return [_baseUrlOverride!];
+    }
+    if (_rawApiBaseUrl.isNotEmpty) {
+      return [_rawApiBaseUrl];
+    }
+    if (kReleaseMode) {
+      return ['https://api.studymate.ai/api/v1'];
+    }
+    if (_rawBackendHost.isNotEmpty) {
+      return ['http://$_rawBackendHost:$_rawBackendPort/api/v1'];
+    }
+    if (kIsWeb) {
+      return ['http://localhost:$_rawBackendPort/api/v1'];
+    }
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return [
+        'http://127.0.0.1:$_rawBackendPort/api/v1',
+        'http://10.0.2.2:$_rawBackendPort/api/v1',
+        'http://192.168.42.248:$_rawBackendPort/api/v1',
+      ];
+    }
+    return ['http://127.0.0.1:$_rawBackendPort/api/v1'];
   }
 
   /// Default network timeouts

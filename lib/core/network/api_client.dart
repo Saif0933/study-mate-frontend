@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import '../config/app_config.dart';
 import '../storage/secure_storage_service.dart';
@@ -56,6 +57,20 @@ class ApiClient {
       );
       return _extractData(response);
     } on DioException catch (e) {
+      if (_isConnectionError(e) &&
+          !kReleaseMode &&
+          !kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.android) {
+        final fallback = await _attemptFallback(
+          method: 'GET',
+          path: path,
+          queryParameters: queryParameters,
+          options: options,
+        );
+        if (fallback != null) {
+          return _extractData(fallback);
+        }
+      }
       throw _handleDioError(e);
     } catch (e) {
       if (e is ApiException) rethrow;
@@ -79,6 +94,21 @@ class ApiClient {
       );
       return _extractData(response);
     } on DioException catch (e) {
+      if (_isConnectionError(e) &&
+          !kReleaseMode &&
+          !kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.android) {
+        final fallback = await _attemptFallback(
+          method: 'POST',
+          path: path,
+          data: data,
+          queryParameters: queryParameters,
+          options: options,
+        );
+        if (fallback != null) {
+          return _extractData(fallback);
+        }
+      }
       throw _handleDioError(e);
     } catch (e) {
       if (e is ApiException) rethrow;
@@ -102,6 +132,21 @@ class ApiClient {
       );
       return _extractData(response);
     } on DioException catch (e) {
+      if (_isConnectionError(e) &&
+          !kReleaseMode &&
+          !kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.android) {
+        final fallback = await _attemptFallback(
+          method: 'PATCH',
+          path: path,
+          data: data,
+          queryParameters: queryParameters,
+          options: options,
+        );
+        if (fallback != null) {
+          return _extractData(fallback);
+        }
+      }
       throw _handleDioError(e);
     } catch (e) {
       if (e is ApiException) rethrow;
@@ -125,6 +170,21 @@ class ApiClient {
       );
       return _extractData(response);
     } on DioException catch (e) {
+      if (_isConnectionError(e) &&
+          !kReleaseMode &&
+          !kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.android) {
+        final fallback = await _attemptFallback(
+          method: 'DELETE',
+          path: path,
+          data: data,
+          queryParameters: queryParameters,
+          options: options,
+        );
+        if (fallback != null) {
+          return _extractData(fallback);
+        }
+      }
       throw _handleDioError(e);
     } catch (e) {
       if (e is ApiException) rethrow;
@@ -137,11 +197,13 @@ class ApiClient {
     String path, {
     required File file,
     required String fileFieldName,
+    String? customFileName,
     Map<String, dynamic>? extraFields,
     ProgressCallback? onSendProgress,
   }) async {
     try {
-      final fileName = file.path.split(Platform.pathSeparator).last;
+      final fileName =
+          customFileName ?? file.path.split(RegExp(r'[/\\]')).last;
       final formData = FormData.fromMap({
         fileFieldName: await MultipartFile.fromFile(
           file.path,
@@ -190,20 +252,7 @@ class ApiClient {
       );
     }
 
-    final errStr = (error.error?.toString() ?? '').toLowerCase();
-    final msgStr = (error.message ?? '').toLowerCase();
-
-    final isConnectionError =
-        error.type == DioExceptionType.connectionError ||
-        error.error is SocketException ||
-        errStr.contains('socketexception') ||
-        errStr.contains('refused') ||
-        errStr.contains('failed host lookup') ||
-        errStr.contains('network is unreachable') ||
-        msgStr.contains('connection refused') ||
-        msgStr.contains('socketexception');
-
-    if (isConnectionError) {
+    if (_isConnectionError(error)) {
       return ApiException(
         code: 'CONNECTION_REFUSED',
         message:
@@ -230,5 +279,65 @@ class ApiClient {
       code: 'UNKNOWN_NETWORK_ERROR',
       message: error.message ?? 'A network communication error occurred.',
     );
+  }
+
+  bool _isConnectionError(DioException error) {
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.connectionError) {
+      return true;
+    }
+
+    final errStr = (error.error?.toString() ?? '').toLowerCase();
+    final msgStr = (error.message ?? '').toLowerCase();
+
+    return error.error is SocketException ||
+        errStr.contains('socketexception') ||
+        errStr.contains('refused') ||
+        errStr.contains('failed host lookup') ||
+        errStr.contains('network is unreachable') ||
+        msgStr.contains('connection refused') ||
+        msgStr.contains('socketexception');
+  }
+
+  Future<Response<dynamic>?> _attemptFallback({
+    required String method,
+    required String path,
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+  }) async {
+    final currentBase = dio.options.baseUrl;
+    final candidates = AppConfig.candidateBaseUrls;
+
+    for (final candidate in candidates) {
+      if (candidate == currentBase) continue;
+
+      try {
+        final probeDio = Dio(
+          BaseOptions(
+            baseUrl: candidate,
+            connectTimeout: const Duration(seconds: 2),
+            receiveTimeout: const Duration(seconds: 2),
+          ),
+        );
+        final healthRes = await probeDio.get('/health');
+        if (healthRes.statusCode == 200) {
+          dio.options.baseUrl = candidate;
+          AppConfig.setBaseUrlOverride(candidate);
+
+          return await dio.request(
+            path,
+            data: data,
+            queryParameters: queryParameters,
+            options: (options ?? Options()).copyWith(method: method),
+          );
+        }
+      } catch (_) {
+        // Try next candidate
+      }
+    }
+    return null;
   }
 }

@@ -88,6 +88,7 @@ class DocumentListController extends AsyncNotifier<List<DocumentModel>> {
 
   /// Pick a PDF using system file picker and upload to backend
   Future<String?> pickAndUploadDocument() async {
+    Directory? tempDirToDelete;
     try {
       final pickedFile = await FilePicker.pickFile(
         type: FileType.custom,
@@ -98,27 +99,62 @@ class DocumentListController extends AsyncNotifier<List<DocumentModel>> {
         return null; // User cancelled
       }
 
-      final path = pickedFile.path;
-      if (path == null) {
-        return 'Could not retrieve file path from picker.';
+      // Check preliminary size if available without I/O
+      final initialSize = pickedFile.lengthSync() ?? await pickedFile.length();
+      if (initialSize != null) {
+        final preValidation =
+            validateFile(name: pickedFile.name, size: initialSize);
+        if (preValidation != null) {
+          return preValidation;
+        }
       }
 
-      final file = File(path);
-      final size = pickedFile.lengthSync() ?? await file.length();
+      File file;
+      if (pickedFile.path != null &&
+          pickedFile.path!.isNotEmpty &&
+          await File(pickedFile.path!).exists()) {
+        file = File(pickedFile.path!);
+      } else {
+        // Fallback for Android (content:// URIs) and Web where path is null
+        final bytes = await pickedFile.readAsBytes();
+        if (bytes.isEmpty) {
+          return 'Selected file is empty (0 bytes). Please select a valid PDF.';
+        }
+        final tempDir = Directory(
+          '${Directory.systemTemp.path}/study_mate_${DateTime.now().millisecondsSinceEpoch}',
+        );
+        await tempDir.create(recursive: true);
+        tempDirToDelete = tempDir;
+        final safeFileName =
+            pickedFile.name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+        final tempFile = File('${tempDir.path}/$safeFileName');
+        await tempFile.writeAsBytes(bytes, flush: true);
+        file = tempFile;
+      }
+
+      final size = await file.length();
       final validationError = validateFile(name: pickedFile.name, size: size);
       if (validationError != null) {
         return validationError;
       }
 
-      return await uploadFile(file);
+      return await uploadFile(file, customFileName: pickedFile.name);
     } catch (e) {
       return 'Error selecting document: ${e.toString()}';
+    } finally {
+      if (tempDirToDelete != null) {
+        try {
+          if (await tempDirToDelete.exists()) {
+            await tempDirToDelete.delete(recursive: true);
+          }
+        } catch (_) {}
+      }
     }
   }
 
   /// Directly upload a PDF file with progress updates
-  Future<String?> uploadFile(File file) async {
-    final fileName = file.path.split(RegExp(r'[/\\]')).last;
+  Future<String?> uploadFile(File file, {String? customFileName}) async {
+    final fileName = customFileName ?? file.path.split(RegExp(r'[/\\]')).last;
     final size = await file.length();
     final validationError = validateFile(name: fileName, size: size);
     if (validationError != null) {
@@ -131,6 +167,7 @@ class DocumentListController extends AsyncNotifier<List<DocumentModel>> {
     try {
       final newDoc = await _repository.uploadDocument(
         file,
+        customFileName: fileName,
         onSendProgress: (sent, total) {
           if (total > 0) {
             ref

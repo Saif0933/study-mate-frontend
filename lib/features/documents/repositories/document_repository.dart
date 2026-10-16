@@ -37,12 +37,14 @@ class DocumentRepository {
   /// Upload a PDF document with progress tracking
   Future<DocumentModel> uploadDocument(
     File file, {
+    String? customFileName,
     ProgressCallback? onSendProgress,
   }) async {
     final response = await apiClient.uploadFile(
       '/documents',
       file: file,
       fileFieldName: 'file',
+      customFileName: customFileName,
       onSendProgress: onSendProgress,
     );
     return DocumentModel.fromJson(response as Map<String, dynamic>);

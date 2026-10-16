@@ -63,6 +63,7 @@ class FakeApiClient extends Fake implements ApiClient {
     String path, {
     required File file,
     required String fileFieldName,
+    String? customFileName,
     Map<String, dynamic>? extraFields,
     ProgressCallback? onSendProgress,
   }) async {
